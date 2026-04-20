@@ -134,6 +134,23 @@ const styles = {
     fontSize: '13px',
     cursor: 'pointer',
   },
+  runBtn: {
+    display: 'block',
+    width: '100%',
+    padding: '10px',
+    marginTop: '12px',
+    background: '#0d9488',
+    border: 'none',
+    borderRadius: '6px',
+    color: '#fff',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    cursor: 'pointer',
+  },
+  runBtnDisabled: {
+    background: '#475569',
+    cursor: 'not-allowed',
+  },
   execStatus: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -252,6 +269,23 @@ function App() {
     }
   };
 
+  const [running, setRunning] = useState({});
+
+  const runWorkflow = async (id) => {
+    setRunning(r => ({ ...r, [id]: true }));
+    try {
+      const res = await fetch(`/api/workflows/${id}/run`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'Failed to run');
+      alert('Workflow started!');
+      refresh();
+    } catch (e) {
+      alert(`Failed to run: ${e.message}`);
+    } finally {
+      setRunning(r => ({ ...r, [id]: false }));
+    }
+  };
+
   const filteredWorkflows = workflows.filter(w => {
     if (filter === 'active') return w.active;
     if (filter === 'inactive') return !w.active;
@@ -346,6 +380,13 @@ function App() {
                 Trigger Webhook
               </button>
             )}
+            <button
+              style={{ ...styles.runBtn, ...(running[w.id] ? styles.runBtnDisabled : {}) }}
+              onClick={() => runWorkflow(w.id)}
+              disabled={running[w.id]}
+            >
+              {running[w.id] ? 'Running...' : 'Run Now'}
+            </button>
           </div>
         ))}
 

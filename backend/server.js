@@ -86,6 +86,43 @@ app.post('/api/workflows/:id/deactivate', async (req, res) => {
   }
 });
 
+app.post('/api/workflows/:id/run', async (req, res) => {
+  try {
+    // Use the public API endpoint for running workflows (added in n8n 1.x)
+    const { status, data } = await proxyToN8n('POST', `/workflows/${req.params.id}/run`, req.body || {});
+    // If the public API doesn't support it, try the test webhook approach
+    if (status === 405 || status === 404) {
+      // Fallback: try to get workflow and trigger via test webhook if it has one
+      const wfRes = await proxyToN8n('GET', `/workflows/${req.params.id}`);
+      if (wfRes.status === 200 && wfRes.data) {
+        const webhookNode = wfRes.data.nodes?.find(n => n.type === 'n8n-nodes-base.webhook');
+        if (webhookNode) {
+          const path = webhookNode.parameters?.path || req.params.id;
+          const webhookUrl = `${N8N_BASE_URL}/webhook-test/${path}`;
+          const webhookRes = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ triggered: true, timestamp: new Date().toISOString() }),
+          });
+          const webhookData = await webhookRes.text();
+          try {
+            res.status(webhookRes.status).json(JSON.parse(webhookData));
+          } catch {
+            res.status(webhookRes.status).json({ message: 'Workflow triggered via test webhook' });
+          }
+          return;
+        }
+      }
+      res.status(status).json({ error: 'Workflow does not support direct execution. Add a webhook node to trigger it.' });
+      return;
+    }
+    res.status(status).json(data);
+  } catch (error) {
+    console.error('Error running workflow:', error.message);
+    res.status(500).json({ error: 'Failed to run workflow' });
+  }
+});
+
 // Executions
 app.get('/api/executions', async (req, res) => {
   try {
