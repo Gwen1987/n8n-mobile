@@ -358,6 +358,119 @@ const styles = {
     cursor: 'pointer',
     marginBottom: '8px',
   },
+  expressionBadge: {
+    display: 'inline-block',
+    padding: '2px 6px',
+    background: '#854d0e',
+    color: '#fef08a',
+    borderRadius: '3px',
+    fontSize: '9px',
+    marginLeft: '6px',
+    fontWeight: 500,
+  },
+  expressionField: {
+    background: '#1c1917',
+    borderColor: '#854d0e',
+    color: '#a3a3a3',
+    cursor: 'not-allowed',
+  },
+  timePickerRow: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+  },
+  timeInput: {
+    width: '70px',
+    padding: '8px 10px',
+    background: '#0f172a',
+    border: '1px solid #334155',
+    borderRadius: '4px',
+    color: '#f8fafc',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    textAlign: 'center',
+  },
+  dayPicker: {
+    display: 'flex',
+    gap: '4px',
+    flexWrap: 'wrap',
+    marginTop: '8px',
+  },
+  dayBtn: {
+    width: '36px',
+    height: '36px',
+    border: '1px solid #334155',
+    background: 'transparent',
+    color: '#94a3b8',
+    borderRadius: '4px',
+    fontFamily: 'inherit',
+    fontSize: '11px',
+    cursor: 'pointer',
+  },
+  dayBtnActive: {
+    background: '#4f46e5',
+    borderColor: '#4f46e5',
+    color: '#fff',
+  },
+  modal: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.8)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 200,
+    padding: '20px',
+  },
+  modalContent: {
+    background: '#1e293b',
+    borderRadius: '8px',
+    padding: '20px',
+    maxWidth: '320px',
+    width: '100%',
+    border: '1px solid #334155',
+  },
+  modalTitle: {
+    fontSize: '16px',
+    fontWeight: 600,
+    color: '#f8fafc',
+    marginBottom: '12px',
+  },
+  modalText: {
+    fontSize: '13px',
+    color: '#94a3b8',
+    marginBottom: '16px',
+    lineHeight: 1.5,
+  },
+  modalBtns: {
+    display: 'flex',
+    gap: '8px',
+  },
+  modalBtn: {
+    flex: 1,
+    padding: '10px',
+    border: 'none',
+    borderRadius: '6px',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    cursor: 'pointer',
+  },
+  modalBtnCancel: {
+    background: '#334155',
+    color: '#94a3b8',
+  },
+  modalBtnConfirm: {
+    background: '#4f46e5',
+    color: '#fff',
+  },
+  channelName: {
+    fontSize: '11px',
+    color: '#64748b',
+    marginTop: '2px',
+  },
 };
 
 function App() {
@@ -439,6 +552,8 @@ function App() {
   const [selectedNode, setSelectedNode] = useState(null); // { workflowId, nodeName }
   const [editedParams, setEditedParams] = useState({});
   const [saving, setSaving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [slackChannels, setSlackChannels] = useState({}); // channelId -> name mapping
 
   const toggleExpand = async (id) => {
     if (expanded === id) {
@@ -495,8 +610,27 @@ function App() {
     setEditedParams(p => ({ ...p, [key]: value }));
   };
 
+  const updateNestedParam = (path, value) => {
+    setEditedParams(p => {
+      const newParams = JSON.parse(JSON.stringify(p));
+      const keys = path.split('.');
+      let obj = newParams;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (!obj[keys[i]]) obj[keys[i]] = {};
+        obj = obj[keys[i]];
+      }
+      obj[keys[keys.length - 1]] = value;
+      return newParams;
+    });
+  };
+
+  const confirmSave = () => {
+    setShowConfirm(true);
+  };
+
   const saveNodeParams = async () => {
     if (!selectedNode) return;
+    setShowConfirm(false);
     setSaving(true);
     try {
       const workflow = workflowDetails[selectedNode.workflowId];
@@ -528,6 +662,23 @@ function App() {
     }
   };
 
+  // Check if a value is an n8n expression
+  const isExpression = (value) => {
+    if (typeof value !== 'string') return false;
+    return value.startsWith('=') || value.includes('{{') || value.includes('$json') || value.includes('$node');
+  };
+
+  // Get readable channel name for Slack
+  const getChannelDisplay = (channelId) => {
+    if (!channelId) return '';
+    if (slackChannels[channelId]) return slackChannels[channelId];
+    // Common channel ID patterns
+    if (channelId.startsWith('C')) return `#${channelId}`;
+    if (channelId.startsWith('D')) return `DM ${channelId}`;
+    if (channelId.startsWith('G')) return `Group ${channelId}`;
+    return channelId;
+  };
+
   // Check if node is a code node (read-only)
   const isCodeNode = (type) => {
     return type?.includes('code') || type?.includes('Code') || type?.includes('function') || type?.includes('Function');
@@ -539,26 +690,34 @@ function App() {
     const params = node.parameters || {};
 
     if (type.includes('scheduleTrigger')) {
+      const interval = params.rule?.interval?.[0] || {};
       return [
-        { key: 'rule.interval', label: 'Interval', type: 'select', options: [
-          { value: 'seconds', label: 'Seconds' },
-          { value: 'minutes', label: 'Minutes' },
-          { value: 'hours', label: 'Hours' },
-          { value: 'days', label: 'Days' },
-          { value: 'weeks', label: 'Weeks' },
-          { value: 'months', label: 'Months' },
-        ], getValue: () => params.rule?.interval?.[0]?.field || 'hours' },
-        { key: 'rule.intervalValue', label: 'Every', type: 'number', getValue: () => {
-          const interval = params.rule?.interval?.[0];
-          return interval?.triggerAtHour || interval?.triggerAtMinute || interval?.minutesInterval || interval?.hoursInterval || 1;
-        }},
+        { key: 'scheduleType', label: 'Schedule Type', type: 'scheduleType',
+          getValue: () => {
+            if (interval.field === 'cronExpression') return 'cron';
+            if (interval.field === 'hours' || interval.triggerAtHour !== undefined) return 'daily';
+            if (interval.field === 'minutes' || interval.minutesInterval) return 'minutes';
+            if (interval.field === 'weeks') return 'weekly';
+            return 'daily';
+          }
+        },
+        { key: 'triggerAtHour', label: 'Hour', type: 'time',
+          getValue: () => interval.triggerAtHour ?? 9,
+          isExpression: isExpression(interval.triggerAtHour),
+        },
+        { key: 'triggerAtMinute', label: 'Minute', type: 'minute',
+          getValue: () => interval.triggerAtMinute ?? 0,
+        },
+        { key: 'triggerAtDay', label: 'Days', type: 'days',
+          getValue: () => interval.triggerAtDay || [1, 2, 3, 4, 5],
+        },
       ];
     }
 
     if (type.includes('gmail')) {
       return [
-        { key: 'resource', label: 'Resource', type: 'text', getValue: () => params.resource || '' },
-        { key: 'operation', label: 'Operation', type: 'text', getValue: () => params.operation || '' },
+        { key: 'resource', label: 'Resource', type: 'text', getValue: () => params.resource || '', isExpression: isExpression(params.resource) },
+        { key: 'operation', label: 'Operation', type: 'text', getValue: () => params.operation || '', isExpression: isExpression(params.operation) },
         { key: 'simple', label: 'Simple Output', type: 'select', options: [
           { value: true, label: 'Yes' },
           { value: false, label: 'No' },
@@ -567,15 +726,27 @@ function App() {
     }
 
     if (type.includes('slack')) {
+      const channelValue = params.channel?.value || params.channel || '';
       return [
-        { key: 'channel', label: 'Channel', type: 'text', getValue: () => params.channel || '' },
-        { key: 'text', label: 'Message', type: 'textarea', getValue: () => params.text || '' },
+        { key: 'channel', label: 'Channel', type: 'slack-channel',
+          getValue: () => channelValue,
+          displayName: getChannelDisplay(channelValue),
+          isExpression: isExpression(channelValue),
+        },
+        { key: 'text', label: 'Message', type: 'textarea',
+          getValue: () => params.text || '',
+          isExpression: isExpression(params.text),
+        },
+        { key: 'select', label: 'Send As', type: 'select', options: [
+          { value: 'bot', label: 'Bot' },
+          { value: 'user', label: 'User' },
+        ], getValue: () => params.authentication || 'bot' },
       ];
     }
 
     if (type.includes('webhook')) {
       return [
-        { key: 'path', label: 'Path', type: 'text', getValue: () => params.path || '' },
+        { key: 'path', label: 'Path', type: 'text', getValue: () => params.path || '', isExpression: isExpression(params.path) },
         { key: 'httpMethod', label: 'Method', type: 'select', options: [
           { value: 'GET', label: 'GET' },
           { value: 'POST', label: 'POST' },
@@ -587,7 +758,7 @@ function App() {
 
     if (type.includes('httpRequest')) {
       return [
-        { key: 'url', label: 'URL', type: 'text', getValue: () => params.url || '' },
+        { key: 'url', label: 'URL', type: 'text', getValue: () => params.url || '', isExpression: isExpression(params.url) },
         { key: 'method', label: 'Method', type: 'select', options: [
           { value: 'GET', label: 'GET' },
           { value: 'POST', label: 'POST' },
@@ -607,7 +778,18 @@ function App() {
         type: typeof v === 'boolean' ? 'select' : typeof v === 'number' ? 'number' : 'text',
         options: typeof v === 'boolean' ? [{ value: true, label: 'Yes' }, { value: false, label: 'No' }] : undefined,
         getValue: () => v,
+        isExpression: isExpression(v),
       }));
+  };
+
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  const toggleDay = (dayIndex) => {
+    const currentDays = editedParams.rule?.interval?.[0]?.triggerAtDay || [1, 2, 3, 4, 5];
+    const newDays = currentDays.includes(dayIndex)
+      ? currentDays.filter(d => d !== dayIndex)
+      : [...currentDays, dayIndex].sort();
+    updateNestedParam('rule.interval.0.triggerAtDay', newDays);
   };
 
   const filteredWorkflows = workflows.filter(w => {
@@ -825,8 +1007,84 @@ function App() {
                                   <>
                                     {editableFields.map(field => (
                                       <div key={field.key} style={styles.paramRow}>
-                                        <div style={styles.paramLabel}>{field.label}</div>
-                                        {field.type === 'select' ? (
+                                        <div style={styles.paramLabel}>
+                                          {field.label}
+                                          {field.isExpression && <span style={styles.expressionBadge}>DYNAMIC</span>}
+                                        </div>
+
+                                        {field.isExpression ? (
+                                          <input
+                                            style={{ ...styles.paramInput, ...styles.expressionField }}
+                                            value={field.getValue()}
+                                            disabled
+                                            title="This field uses a dynamic expression"
+                                          />
+                                        ) : field.type === 'scheduleType' ? (
+                                          <select
+                                            style={styles.paramSelect}
+                                            value={field.getValue()}
+                                            onChange={(e) => updateNestedParam('rule.interval.0.field', e.target.value)}
+                                          >
+                                            <option value="daily">Daily</option>
+                                            <option value="weekly">Weekly</option>
+                                            <option value="minutes">Every X Minutes</option>
+                                            <option value="cron">Cron Expression</option>
+                                          </select>
+                                        ) : field.type === 'time' ? (
+                                          <div style={styles.timePickerRow}>
+                                            <select
+                                              style={styles.timeInput}
+                                              value={editedParams.rule?.interval?.[0]?.triggerAtHour ?? field.getValue()}
+                                              onChange={(e) => updateNestedParam('rule.interval.0.triggerAtHour', Number(e.target.value))}
+                                            >
+                                              {Array.from({ length: 24 }, (_, i) => (
+                                                <option key={i} value={i}>{i.toString().padStart(2, '0')}:00</option>
+                                              ))}
+                                            </select>
+                                            <span style={{ color: '#64748b' }}>hrs</span>
+                                          </div>
+                                        ) : field.type === 'minute' ? (
+                                          <div style={styles.timePickerRow}>
+                                            <select
+                                              style={styles.timeInput}
+                                              value={editedParams.rule?.interval?.[0]?.triggerAtMinute ?? field.getValue()}
+                                              onChange={(e) => updateNestedParam('rule.interval.0.triggerAtMinute', Number(e.target.value))}
+                                            >
+                                              {Array.from({ length: 60 }, (_, i) => (
+                                                <option key={i} value={i}>{i.toString().padStart(2, '0')}</option>
+                                              ))}
+                                            </select>
+                                            <span style={{ color: '#64748b' }}>min</span>
+                                          </div>
+                                        ) : field.type === 'days' ? (
+                                          <div style={styles.dayPicker}>
+                                            {DAYS.map((day, idx) => {
+                                              const selectedDays = editedParams.rule?.interval?.[0]?.triggerAtDay || field.getValue();
+                                              const isActive = selectedDays.includes(idx);
+                                              return (
+                                                <button
+                                                  key={day}
+                                                  style={{ ...styles.dayBtn, ...(isActive ? styles.dayBtnActive : {}) }}
+                                                  onClick={(e) => { e.stopPropagation(); toggleDay(idx); }}
+                                                >
+                                                  {day}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        ) : field.type === 'slack-channel' ? (
+                                          <>
+                                            <input
+                                              style={styles.paramInput}
+                                              value={editedParams[field.key] ?? field.getValue()}
+                                              onChange={(e) => updateParam(field.key, e.target.value)}
+                                              placeholder="Channel ID (e.g., C01234567)"
+                                            />
+                                            {field.displayName && (
+                                              <div style={styles.channelName}>{field.displayName}</div>
+                                            )}
+                                          </>
+                                        ) : field.type === 'select' ? (
                                           <select
                                             style={styles.paramSelect}
                                             value={editedParams[field.key] ?? field.getValue()}
@@ -857,7 +1115,7 @@ function App() {
                                     ))}
                                     <button
                                       style={{ ...styles.saveBtn, ...(saving ? styles.saveBtnDisabled : {}) }}
-                                      onClick={(e) => { e.stopPropagation(); saveNodeParams(); }}
+                                      onClick={(e) => { e.stopPropagation(); confirmSave(); }}
                                       disabled={saving}
                                     >
                                       {saving ? 'Saving...' : 'Save Changes'}
@@ -924,6 +1182,32 @@ function App() {
           );
         })}
       </div>
+
+      {showConfirm && (
+        <div style={styles.modal} onClick={() => setShowConfirm(false)}>
+          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalTitle}>Confirm Changes</div>
+            <div style={styles.modalText}>
+              Are you sure you want to save these changes to <strong>{selectedNode?.nodeName}</strong>?
+              This will update the workflow immediately.
+            </div>
+            <div style={styles.modalBtns}>
+              <button
+                style={{ ...styles.modalBtn, ...styles.modalBtnCancel }}
+                onClick={() => setShowConfirm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                style={{ ...styles.modalBtn, ...styles.modalBtnConfirm }}
+                onClick={saveNodeParams}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
