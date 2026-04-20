@@ -195,6 +195,75 @@ const styles = {
     fontSize: '12px',
     color: '#64748b',
   },
+  cardClickable: {
+    cursor: 'pointer',
+  },
+  diagram: {
+    marginTop: '16px',
+    padding: '12px',
+    background: '#0f172a',
+    borderRadius: '6px',
+    overflowX: 'auto',
+  },
+  diagramLoading: {
+    textAlign: 'center',
+    padding: '20px',
+    color: '#64748b',
+    fontSize: '12px',
+  },
+  nodeList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  nodeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  node: {
+    padding: '8px 12px',
+    background: '#334155',
+    borderRadius: '6px',
+    border: '2px solid #475569',
+    fontSize: '12px',
+    minWidth: '120px',
+  },
+  nodeError: {
+    borderColor: '#ef4444',
+    background: '#7f1d1d',
+  },
+  nodeTrigger: {
+    borderColor: '#22c55e',
+  },
+  nodeName: {
+    fontWeight: 500,
+    color: '#f8fafc',
+    marginBottom: '2px',
+  },
+  nodeType: {
+    fontSize: '10px',
+    color: '#94a3b8',
+  },
+  connector: {
+    width: '2px',
+    height: '16px',
+    background: '#475569',
+    marginLeft: '20px',
+  },
+  connectorArrow: {
+    width: 0,
+    height: 0,
+    borderLeft: '6px solid transparent',
+    borderRight: '6px solid transparent',
+    borderTop: '8px solid #475569',
+    marginLeft: '14px',
+  },
+  expandHint: {
+    fontSize: '11px',
+    color: '#64748b',
+    marginTop: '8px',
+  },
 };
 
 function App() {
@@ -270,6 +339,31 @@ function App() {
   };
 
   const [running, setRunning] = useState({});
+  const [expanded, setExpanded] = useState(null);
+  const [workflowDetails, setWorkflowDetails] = useState({});
+  const [loadingDetails, setLoadingDetails] = useState({});
+
+  const toggleExpand = async (id) => {
+    if (expanded === id) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(id);
+    if (!workflowDetails[id]) {
+      setLoadingDetails(l => ({ ...l, [id]: true }));
+      try {
+        const res = await fetch(`/api/workflows/${id}`);
+        const data = await res.json();
+        if (res.ok) {
+          setWorkflowDetails(d => ({ ...d, [id]: data }));
+        }
+      } catch (e) {
+        console.error('Failed to fetch workflow details:', e);
+      } finally {
+        setLoadingDetails(l => ({ ...l, [id]: false }));
+      }
+    }
+  };
 
   const runWorkflow = async (id) => {
     setRunning(r => ({ ...r, [id]: true }));
@@ -299,6 +393,63 @@ function App() {
   }, [workflows]);
 
   const hasWebhook = (w) => w.nodes?.some(n => n.type === 'n8n-nodes-base.webhook');
+
+  // Get error nodes from last execution for a workflow
+  const getErrorNodes = (workflowId) => {
+    const lastExec = executions.find(e => e.workflowId === workflowId && e.status === 'error');
+    if (!lastExec) return new Set();
+    const failedNode = lastExec.data?.resultData?.lastNodeExecuted;
+    return failedNode ? new Set([failedNode]) : new Set();
+  };
+
+  // Build ordered node list following connections
+  const getOrderedNodes = (workflow) => {
+    if (!workflow?.nodes) return [];
+    const nodes = workflow.nodes;
+    const connections = workflow.connections || {};
+
+    // Find trigger/start nodes (nodes with no incoming connections)
+    const hasIncoming = new Set();
+    Object.values(connections).forEach(nodeConns => {
+      Object.values(nodeConns).forEach(outputs => {
+        outputs.forEach(conns => {
+          conns.forEach(c => hasIncoming.add(c.node));
+        });
+      });
+    });
+
+    const startNodes = nodes.filter(n => !hasIncoming.has(n.name));
+    const ordered = [];
+    const visited = new Set();
+
+    const visit = (nodeName) => {
+      if (visited.has(nodeName)) return;
+      visited.add(nodeName);
+      const node = nodes.find(n => n.name === nodeName);
+      if (node) ordered.push(node);
+      const nodeConns = connections[nodeName];
+      if (nodeConns) {
+        Object.values(nodeConns).forEach(outputs => {
+          outputs.forEach(conns => {
+            conns.forEach(c => visit(c.node));
+          });
+        });
+      }
+    };
+
+    startNodes.forEach(n => visit(n.name));
+    // Add any unvisited nodes
+    nodes.forEach(n => {
+      if (!visited.has(n.name)) ordered.push(n);
+    });
+
+    return ordered;
+  };
+
+  const formatNodeType = (type) => {
+    if (!type) return '';
+    return type.replace('n8n-nodes-base.', '').replace(/([A-Z])/g, ' $1').trim();
+  };
 
   const formatDate = (dateStr) => {
     const d = new Date(dateStr);
@@ -355,40 +506,87 @@ function App() {
       {error && <div style={styles.error}>{error}</div>}
 
       <div style={styles.list}>
-        {tab === 'workflows' && filteredWorkflows.map(w => (
-          <div key={w.id} style={styles.card}>
-            <div style={styles.cardHeader}>
-              <h3 style={styles.workflowName}>{w.name}</h3>
-              <button
-                style={{
-                  ...styles.toggle,
-                  background: w.active ? '#4f46e5' : '#475569',
-                }}
-                onClick={() => toggleWorkflow(w.id, w.active)}
+        {tab === 'workflows' && filteredWorkflows.map(w => {
+          const isExpanded = expanded === w.id;
+          const details = workflowDetails[w.id];
+          const errorNodes = getErrorNodes(w.id);
+          const orderedNodes = details ? getOrderedNodes(details) : [];
+
+          return (
+            <div key={w.id} style={styles.card}>
+              <div
+                style={{ ...styles.cardHeader, ...styles.cardClickable }}
+                onClick={() => toggleExpand(w.id)}
               >
-                <span style={{
-                  ...styles.toggleKnob,
-                  left: w.active ? '22px' : '2px',
-                }} />
+                <h3 style={styles.workflowName}>{w.name}</h3>
+                <button
+                  style={{
+                    ...styles.toggle,
+                    background: w.active ? '#4f46e5' : '#475569',
+                  }}
+                  onClick={(e) => { e.stopPropagation(); toggleWorkflow(w.id, w.active); }}
+                >
+                  <span style={{
+                    ...styles.toggleKnob,
+                    left: w.active ? '22px' : '2px',
+                  }} />
+                </button>
+              </div>
+              <span style={{ ...styles.badge, ...(w.active ? styles.badgeActive : styles.badgeInactive) }}>
+                {w.active ? 'Active' : 'Inactive'}
+              </span>
+              {!isExpanded && (
+                <div style={styles.expandHint}>Tap to view diagram</div>
+              )}
+              {isExpanded && (
+                <div style={styles.diagram}>
+                  {loadingDetails[w.id] ? (
+                    <div style={styles.diagramLoading}>Loading...</div>
+                  ) : (
+                    <div style={styles.nodeList}>
+                      {orderedNodes.map((node, idx) => {
+                        const isError = errorNodes.has(node.name);
+                        const isTrigger = node.type?.includes('Trigger');
+                        return (
+                          <div key={node.id || node.name}>
+                            {idx > 0 && (
+                              <>
+                                <div style={styles.connector} />
+                                <div style={styles.connectorArrow} />
+                              </>
+                            )}
+                            <div style={styles.nodeRow}>
+                              <div style={{
+                                ...styles.node,
+                                ...(isError ? styles.nodeError : {}),
+                                ...(isTrigger && !isError ? styles.nodeTrigger : {}),
+                              }}>
+                                <div style={styles.nodeName}>{node.name}</div>
+                                <div style={styles.nodeType}>{formatNodeType(node.type)}</div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+              {hasWebhook(w) && w.active && (
+                <button style={styles.webhookBtn} onClick={(e) => { e.stopPropagation(); triggerWebhook(w); }}>
+                  Trigger Webhook
+                </button>
+              )}
+              <button
+                style={{ ...styles.runBtn, ...(running[w.id] ? styles.runBtnDisabled : {}) }}
+                onClick={(e) => { e.stopPropagation(); runWorkflow(w.id); }}
+                disabled={running[w.id]}
+              >
+                {running[w.id] ? 'Running...' : 'Run Now'}
               </button>
             </div>
-            <span style={{ ...styles.badge, ...(w.active ? styles.badgeActive : styles.badgeInactive) }}>
-              {w.active ? 'Active' : 'Inactive'}
-            </span>
-            {hasWebhook(w) && w.active && (
-              <button style={styles.webhookBtn} onClick={() => triggerWebhook(w)}>
-                Trigger Webhook
-              </button>
-            )}
-            <button
-              style={{ ...styles.runBtn, ...(running[w.id] ? styles.runBtnDisabled : {}) }}
-              onClick={() => runWorkflow(w.id)}
-              disabled={running[w.id]}
-            >
-              {running[w.id] ? 'Running...' : 'Run Now'}
-            </button>
-          </div>
-        ))}
+          );
+        })}
 
         {tab === 'executions' && executions.map(ex => {
           const errorInfo = ex.data?.resultData?.error;
