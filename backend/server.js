@@ -130,9 +130,23 @@ app.post('/api/workflows/:id/deactivate', async (req, res) => {
 });
 
 // Update workflow (for node parameter changes)
-app.patch('/api/workflows/:id', async (req, res) => {
+app.put('/api/workflows/:id', async (req, res) => {
   try {
-    const { status, data } = await proxyToN8n('PATCH', `/workflows/${req.params.id}`, req.body);
+    // Fetch current workflow to get all required fields
+    const { status: getStatus, data: current } = await proxyToN8n('GET', `/workflows/${req.params.id}`);
+    if (getStatus !== 200) {
+      return res.status(getStatus).json(current);
+    }
+
+    // Build PUT body with required fields only
+    const updateBody = {
+      name: current.name,
+      nodes: req.body.nodes || current.nodes,
+      connections: current.connections,
+      settings: { executionOrder: current.settings?.executionOrder || 'v1' },
+    };
+
+    const { status, data } = await proxyToN8n('PUT', `/workflows/${req.params.id}`, updateBody);
     res.status(status).json(data);
   } catch (error) {
     console.error('Error updating workflow:', error.message);

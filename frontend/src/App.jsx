@@ -642,7 +642,7 @@ function App() {
       });
 
       const res = await fetch(`/api/workflows/${selectedNode.workflowId}`, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes: updatedNodes }),
       });
