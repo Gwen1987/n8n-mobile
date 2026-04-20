@@ -471,6 +471,21 @@ const styles = {
     color: '#64748b',
     marginTop: '2px',
   },
+  readOnlyNote: {
+    fontSize: '10px',
+    color: '#64748b',
+    marginTop: '6px',
+    fontStyle: 'italic',
+  },
+  readOnlyValue: {
+    padding: '8px 10px',
+    background: '#1c1917',
+    border: '1px solid #334155',
+    borderRadius: '4px',
+    color: '#94a3b8',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+  },
 };
 
 function App() {
@@ -727,15 +742,16 @@ function App() {
 
     if (type.includes('slack')) {
       const channelValue = params.channel?.value || params.channel || '';
+      const messageValue = params.text || '';
       return [
-        { key: 'channel', label: 'Channel', type: 'slack-channel',
+        { key: 'channel', label: 'Channel ID', type: 'slack-channel-readonly',
           getValue: () => channelValue,
-          displayName: getChannelDisplay(channelValue),
-          isExpression: isExpression(channelValue),
+          readOnly: true,
         },
         { key: 'text', label: 'Message', type: 'textarea',
-          getValue: () => params.text || '',
-          isExpression: isExpression(params.text),
+          getValue: () => messageValue,
+          isExpression: isExpression(messageValue),
+          readOnly: isExpression(messageValue),
         },
         { key: 'select', label: 'Send As', type: 'select', options: [
           { value: 'bot', label: 'Bot' },
@@ -1072,17 +1088,14 @@ function App() {
                                               );
                                             })}
                                           </div>
-                                        ) : field.type === 'slack-channel' ? (
+                                        ) : field.type === 'slack-channel-readonly' ? (
                                           <>
-                                            <input
-                                              style={styles.paramInput}
-                                              value={editedParams[field.key] ?? field.getValue()}
-                                              onChange={(e) => updateParam(field.key, e.target.value)}
-                                              placeholder="Channel ID (e.g., C01234567)"
-                                            />
-                                            {field.displayName && (
-                                              <div style={styles.channelName}>{field.displayName}</div>
-                                            )}
+                                            <div style={styles.readOnlyValue}>
+                                              {field.getValue() || '(not set)'}
+                                            </div>
+                                            <div style={styles.readOnlyNote}>
+                                              Edit channel IDs in the n8n web editor
+                                            </div>
                                           </>
                                         ) : field.type === 'select' ? (
                                           <select
@@ -1098,11 +1111,22 @@ function App() {
                                             ))}
                                           </select>
                                         ) : field.type === 'textarea' ? (
-                                          <textarea
-                                            style={{ ...styles.paramInput, minHeight: '80px', resize: 'vertical' }}
-                                            value={editedParams[field.key] ?? field.getValue()}
-                                            onChange={(e) => updateParam(field.key, e.target.value)}
-                                          />
+                                          field.readOnly ? (
+                                            <>
+                                              <pre style={{ ...styles.codeBlock, minHeight: '60px' }}>
+                                                {field.getValue()}
+                                              </pre>
+                                              <div style={styles.readOnlyNote}>
+                                                Contains expressions — edit in n8n web editor
+                                              </div>
+                                            </>
+                                          ) : (
+                                            <textarea
+                                              style={{ ...styles.paramInput, minHeight: '80px', resize: 'vertical' }}
+                                              value={editedParams[field.key] ?? field.getValue()}
+                                              onChange={(e) => updateParam(field.key, e.target.value)}
+                                            />
+                                          )
                                         ) : (
                                           <input
                                             style={styles.paramInput}
