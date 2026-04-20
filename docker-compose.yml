@@ -1,0 +1,15 @@
+services:
+  n8n-mobile:
+    build: .
+    container_name: n8n-mobile
+    restart: unless-stopped
+    ports:
+      - "3080:3080"
+    env_file:
+      - .env
+    networks:
+      - n8n-network
+
+networks:
+  n8n-network:
+    external: true
