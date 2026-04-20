@@ -129,6 +129,17 @@ app.post('/api/workflows/:id/deactivate', async (req, res) => {
   }
 });
 
+// Update workflow (for node parameter changes)
+app.patch('/api/workflows/:id', async (req, res) => {
+  try {
+    const { status, data } = await proxyToN8n('PATCH', `/workflows/${req.params.id}`, req.body);
+    res.status(status).json(data);
+  } catch (error) {
+    console.error('Error updating workflow:', error.message);
+    res.status(500).json({ error: 'Failed to update workflow' });
+  }
+});
+
 app.post('/api/workflows/:id/run', async (req, res) => {
   try {
     // Fetch the workflow data first to find the trigger node

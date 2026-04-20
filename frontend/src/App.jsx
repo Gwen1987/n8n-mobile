@@ -264,6 +264,100 @@ const styles = {
     color: '#64748b',
     marginTop: '8px',
   },
+  nodeClickable: {
+    cursor: 'pointer',
+  },
+  nodeExpanded: {
+    borderColor: '#4f46e5',
+    background: '#1e293b',
+  },
+  nodeParams: {
+    marginTop: '8px',
+    padding: '12px',
+    background: '#1e293b',
+    borderRadius: '6px',
+    border: '1px solid #334155',
+  },
+  paramRow: {
+    marginBottom: '12px',
+  },
+  paramLabel: {
+    fontSize: '11px',
+    color: '#94a3b8',
+    marginBottom: '4px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  paramInput: {
+    width: '100%',
+    padding: '8px 10px',
+    background: '#0f172a',
+    border: '1px solid #334155',
+    borderRadius: '4px',
+    color: '#f8fafc',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    boxSizing: 'border-box',
+  },
+  paramSelect: {
+    width: '100%',
+    padding: '8px 10px',
+    background: '#0f172a',
+    border: '1px solid #334155',
+    borderRadius: '4px',
+    color: '#f8fafc',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    boxSizing: 'border-box',
+  },
+  codeBlock: {
+    width: '100%',
+    minHeight: '120px',
+    padding: '10px',
+    background: '#0f172a',
+    border: '1px solid #334155',
+    borderRadius: '4px',
+    color: '#94a3b8',
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '11px',
+    whiteSpace: 'pre-wrap',
+    overflow: 'auto',
+    boxSizing: 'border-box',
+  },
+  saveBtn: {
+    display: 'block',
+    width: '100%',
+    padding: '10px',
+    marginTop: '12px',
+    background: '#4f46e5',
+    border: 'none',
+    borderRadius: '6px',
+    color: '#fff',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    cursor: 'pointer',
+  },
+  saveBtnDisabled: {
+    background: '#475569',
+    cursor: 'not-allowed',
+  },
+  paramHint: {
+    fontSize: '10px',
+    color: '#64748b',
+    marginTop: '4px',
+  },
+  closeNodeBtn: {
+    display: 'inline-block',
+    padding: '4px 8px',
+    background: '#334155',
+    border: 'none',
+    borderRadius: '4px',
+    color: '#94a3b8',
+    fontFamily: 'inherit',
+    fontSize: '11px',
+    cursor: 'pointer',
+    marginBottom: '8px',
+  },
 };
 
 function App() {
@@ -342,6 +436,9 @@ function App() {
   const [expanded, setExpanded] = useState(null);
   const [workflowDetails, setWorkflowDetails] = useState({});
   const [loadingDetails, setLoadingDetails] = useState({});
+  const [selectedNode, setSelectedNode] = useState(null); // { workflowId, nodeName }
+  const [editedParams, setEditedParams] = useState({});
+  const [saving, setSaving] = useState(false);
 
   const toggleExpand = async (id) => {
     if (expanded === id) {
@@ -378,6 +475,139 @@ function App() {
     } finally {
       setRunning(r => ({ ...r, [id]: false }));
     }
+  };
+
+  const selectNode = (workflowId, nodeName) => {
+    if (selectedNode?.workflowId === workflowId && selectedNode?.nodeName === nodeName) {
+      setSelectedNode(null);
+      setEditedParams({});
+      return;
+    }
+    const workflow = workflowDetails[workflowId];
+    const node = workflow?.nodes?.find(n => n.name === nodeName);
+    if (node) {
+      setSelectedNode({ workflowId, nodeName });
+      setEditedParams(JSON.parse(JSON.stringify(node.parameters || {})));
+    }
+  };
+
+  const updateParam = (key, value) => {
+    setEditedParams(p => ({ ...p, [key]: value }));
+  };
+
+  const saveNodeParams = async () => {
+    if (!selectedNode) return;
+    setSaving(true);
+    try {
+      const workflow = workflowDetails[selectedNode.workflowId];
+      const updatedNodes = workflow.nodes.map(n => {
+        if (n.name === selectedNode.nodeName) {
+          return { ...n, parameters: editedParams };
+        }
+        return n;
+      });
+
+      const res = await fetch(`/api/workflows/${selectedNode.workflowId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes: updatedNodes }),
+      });
+
+      if (res.ok) {
+        const updated = await res.json();
+        setWorkflowDetails(d => ({ ...d, [selectedNode.workflowId]: updated }));
+        alert('Saved!');
+      } else {
+        const err = await res.json();
+        alert(`Failed: ${err.message || err.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Failed to save: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Check if node is a code node (read-only)
+  const isCodeNode = (type) => {
+    return type?.includes('code') || type?.includes('Code') || type?.includes('function') || type?.includes('Function');
+  };
+
+  // Get editable fields for common node types
+  const getEditableFields = (node) => {
+    const type = node.type || '';
+    const params = node.parameters || {};
+
+    if (type.includes('scheduleTrigger')) {
+      return [
+        { key: 'rule.interval', label: 'Interval', type: 'select', options: [
+          { value: 'seconds', label: 'Seconds' },
+          { value: 'minutes', label: 'Minutes' },
+          { value: 'hours', label: 'Hours' },
+          { value: 'days', label: 'Days' },
+          { value: 'weeks', label: 'Weeks' },
+          { value: 'months', label: 'Months' },
+        ], getValue: () => params.rule?.interval?.[0]?.field || 'hours' },
+        { key: 'rule.intervalValue', label: 'Every', type: 'number', getValue: () => {
+          const interval = params.rule?.interval?.[0];
+          return interval?.triggerAtHour || interval?.triggerAtMinute || interval?.minutesInterval || interval?.hoursInterval || 1;
+        }},
+      ];
+    }
+
+    if (type.includes('gmail')) {
+      return [
+        { key: 'resource', label: 'Resource', type: 'text', getValue: () => params.resource || '' },
+        { key: 'operation', label: 'Operation', type: 'text', getValue: () => params.operation || '' },
+        { key: 'simple', label: 'Simple Output', type: 'select', options: [
+          { value: true, label: 'Yes' },
+          { value: false, label: 'No' },
+        ], getValue: () => params.simple },
+      ];
+    }
+
+    if (type.includes('slack')) {
+      return [
+        { key: 'channel', label: 'Channel', type: 'text', getValue: () => params.channel || '' },
+        { key: 'text', label: 'Message', type: 'textarea', getValue: () => params.text || '' },
+      ];
+    }
+
+    if (type.includes('webhook')) {
+      return [
+        { key: 'path', label: 'Path', type: 'text', getValue: () => params.path || '' },
+        { key: 'httpMethod', label: 'Method', type: 'select', options: [
+          { value: 'GET', label: 'GET' },
+          { value: 'POST', label: 'POST' },
+          { value: 'PUT', label: 'PUT' },
+          { value: 'DELETE', label: 'DELETE' },
+        ], getValue: () => params.httpMethod || 'GET' },
+      ];
+    }
+
+    if (type.includes('httpRequest')) {
+      return [
+        { key: 'url', label: 'URL', type: 'text', getValue: () => params.url || '' },
+        { key: 'method', label: 'Method', type: 'select', options: [
+          { value: 'GET', label: 'GET' },
+          { value: 'POST', label: 'POST' },
+          { value: 'PUT', label: 'PUT' },
+          { value: 'DELETE', label: 'DELETE' },
+        ], getValue: () => params.method || 'GET' },
+      ];
+    }
+
+    // Generic: show all simple string/number/boolean params
+    return Object.entries(params)
+      .filter(([k, v]) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
+      .slice(0, 6) // Limit to 6 params
+      .map(([k, v]) => ({
+        key: k,
+        label: k.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()),
+        type: typeof v === 'boolean' ? 'select' : typeof v === 'number' ? 'number' : 'text',
+        options: typeof v === 'boolean' ? [{ value: true, label: 'Yes' }, { value: false, label: 'No' }] : undefined,
+        getValue: () => v,
+      }));
   };
 
   const filteredWorkflows = workflows.filter(w => {
@@ -547,6 +777,10 @@ function App() {
                       {orderedNodes.map((node, idx) => {
                         const isError = errorNodes.has(node.name);
                         const isTrigger = node.type?.includes('Trigger');
+                        const isSelected = selectedNode?.workflowId === w.id && selectedNode?.nodeName === node.name;
+                        const isCode = isCodeNode(node.type);
+                        const editableFields = !isCode ? getEditableFields(node) : [];
+
                         return (
                           <div key={node.id || node.name}>
                             {idx > 0 && (
@@ -556,15 +790,89 @@ function App() {
                               </>
                             )}
                             <div style={styles.nodeRow}>
-                              <div style={{
-                                ...styles.node,
-                                ...(isError ? styles.nodeError : {}),
-                                ...(isTrigger && !isError ? styles.nodeTrigger : {}),
-                              }}>
+                              <div
+                                style={{
+                                  ...styles.node,
+                                  ...styles.nodeClickable,
+                                  ...(isError ? styles.nodeError : {}),
+                                  ...(isTrigger && !isError ? styles.nodeTrigger : {}),
+                                  ...(isSelected ? styles.nodeExpanded : {}),
+                                }}
+                                onClick={(e) => { e.stopPropagation(); selectNode(w.id, node.name); }}
+                              >
                                 <div style={styles.nodeName}>{node.name}</div>
                                 <div style={styles.nodeType}>{formatNodeType(node.type)}</div>
                               </div>
                             </div>
+
+                            {isSelected && (
+                              <div style={styles.nodeParams}>
+                                <button
+                                  style={styles.closeNodeBtn}
+                                  onClick={(e) => { e.stopPropagation(); setSelectedNode(null); }}
+                                >
+                                  Close
+                                </button>
+
+                                {isCode ? (
+                                  <div style={styles.paramRow}>
+                                    <div style={styles.paramLabel}>Code (read-only)</div>
+                                    <pre style={styles.codeBlock}>
+                                      {node.parameters?.jsCode || node.parameters?.functionCode || node.parameters?.code || JSON.stringify(node.parameters, null, 2)}
+                                    </pre>
+                                  </div>
+                                ) : editableFields.length > 0 ? (
+                                  <>
+                                    {editableFields.map(field => (
+                                      <div key={field.key} style={styles.paramRow}>
+                                        <div style={styles.paramLabel}>{field.label}</div>
+                                        {field.type === 'select' ? (
+                                          <select
+                                            style={styles.paramSelect}
+                                            value={editedParams[field.key] ?? field.getValue()}
+                                            onChange={(e) => {
+                                              const val = e.target.value === 'true' ? true : e.target.value === 'false' ? false : e.target.value;
+                                              updateParam(field.key, val);
+                                            }}
+                                          >
+                                            {field.options.map(opt => (
+                                              <option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>
+                                            ))}
+                                          </select>
+                                        ) : field.type === 'textarea' ? (
+                                          <textarea
+                                            style={{ ...styles.paramInput, minHeight: '80px', resize: 'vertical' }}
+                                            value={editedParams[field.key] ?? field.getValue()}
+                                            onChange={(e) => updateParam(field.key, e.target.value)}
+                                          />
+                                        ) : (
+                                          <input
+                                            style={styles.paramInput}
+                                            type={field.type}
+                                            value={editedParams[field.key] ?? field.getValue()}
+                                            onChange={(e) => updateParam(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)}
+                                          />
+                                        )}
+                                      </div>
+                                    ))}
+                                    <button
+                                      style={{ ...styles.saveBtn, ...(saving ? styles.saveBtnDisabled : {}) }}
+                                      onClick={(e) => { e.stopPropagation(); saveNodeParams(); }}
+                                      disabled={saving}
+                                    >
+                                      {saving ? 'Saving...' : 'Save Changes'}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <div style={styles.paramHint}>
+                                    No editable parameters for this node type.
+                                    <pre style={{ ...styles.codeBlock, marginTop: '8px' }}>
+                                      {JSON.stringify(node.parameters, null, 2)}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
