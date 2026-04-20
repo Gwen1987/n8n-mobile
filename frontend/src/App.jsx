@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 const styles = {
   app: {
@@ -245,6 +245,12 @@ function App() {
     return true;
   });
 
+  const workflowNames = useMemo(() => {
+    const map = {};
+    workflows.forEach(w => { map[w.id] = w.name; });
+    return map;
+  }, [workflows]);
+
   const hasWebhook = (w) => w.nodes?.some(n => n.type === 'n8n-nodes-base.webhook');
 
   const formatDate = (dateStr) => {
@@ -341,7 +347,7 @@ function App() {
                 {ex.status}
               </span>
             </div>
-            <div style={styles.workflowName}>{ex.workflowData?.name || `Workflow ${ex.workflowId}`}</div>
+            <div style={styles.workflowName}>{workflowNames[ex.workflowId] || `Workflow ${ex.workflowId}`}</div>
             <div style={styles.execMeta}>
               {formatDate(ex.startedAt)} &bull; {ex.stoppedAt ? `${((new Date(ex.stoppedAt) - new Date(ex.startedAt)) / 1000).toFixed(1)}s` : 'running'}
             </div>
