@@ -519,17 +519,29 @@ function App() {
     }
   }, []);
 
+  const fetchSlackChannels = useCallback(async () => {
+    try {
+      const res = await fetch('/api/slack-channels');
+      const data = await res.json();
+      if (res.ok && data.channels) {
+        setSlackChannels(data.channels);
+      }
+    } catch (e) {
+      console.error('Failed to fetch Slack channels:', e);
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     setError(null);
-    await Promise.all([fetchWorkflows(), fetchExecutions()]);
+    await Promise.all([fetchWorkflows(), fetchExecutions(), fetchSlackChannels()]);
     setRefreshing(false);
-  }, [fetchWorkflows, fetchExecutions]);
+  }, [fetchWorkflows, fetchExecutions, fetchSlackChannels]);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchWorkflows(), fetchExecutions()]).finally(() => setLoading(false));
-  }, [fetchWorkflows, fetchExecutions]);
+    Promise.all([fetchWorkflows(), fetchExecutions(), fetchSlackChannels()]).finally(() => setLoading(false));
+  }, [fetchWorkflows, fetchExecutions, fetchSlackChannels]);
 
   const toggleWorkflow = async (id, active) => {
     const action = active ? 'deactivate' : 'activate';
@@ -568,7 +580,7 @@ function App() {
   const [editedParams, setEditedParams] = useState({});
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [slackChannels, setSlackChannels] = useState({}); // channelId -> name mapping
+  const [slackChannels, setSlackChannels] = useState([]); // Array of { id, name } from all workflows
 
   const toggleExpand = async (id) => {
     if (expanded === id) {
@@ -686,8 +698,9 @@ function App() {
   // Get readable channel name for Slack
   const getChannelDisplay = (channelId) => {
     if (!channelId) return '';
-    if (slackChannels[channelId]) return slackChannels[channelId];
-    // Common channel ID patterns
+    const channel = slackChannels.find(c => c.id === channelId);
+    if (channel?.name) return channel.name;
+    // Common channel ID patterns - add prefix hint
     if (channelId.startsWith('C')) return `#${channelId}`;
     if (channelId.startsWith('D')) return `DM ${channelId}`;
     if (channelId.startsWith('G')) return `Group ${channelId}`;
@@ -741,12 +754,21 @@ function App() {
     }
 
     if (type.includes('slack')) {
-      const channelValue = params.channel?.value || params.channel || '';
+      // n8n uses either channelId or channel depending on node version
+      const channelParam = params.channelId || params.channel;
+      const channelKey = params.channelId !== undefined ? 'channelId' : 'channel';
+      const channelValue = channelParam?.value || channelParam || '';
       const messageValue = params.text || '';
+      const channelIsExpression = isExpression(channelValue);
       return [
-        { key: 'channel', label: 'Channel ID', type: 'slack-channel-readonly',
+        { key: channelKey, label: 'Channel', type: channelIsExpression ? 'slack-channel-readonly' : 'slack-channel',
           getValue: () => channelValue,
-          readOnly: true,
+          isExpression: channelIsExpression,
+          readOnly: channelIsExpression,
+          options: slackChannels.map(c => ({
+            value: c.id,
+            label: c.name || c.id,
+          })),
         },
         { key: 'text', label: 'Message', type: 'textarea',
           getValue: () => messageValue,
@@ -1091,12 +1113,28 @@ function App() {
                                         ) : field.type === 'slack-channel-readonly' ? (
                                           <>
                                             <div style={styles.readOnlyValue}>
-                                              {field.getValue() || '(not set)'}
+                                              {getChannelDisplay(field.getValue()) || '(not set)'}
                                             </div>
                                             <div style={styles.readOnlyNote}>
-                                              Edit channel IDs in the n8n web editor
+                                              Contains expression — edit in n8n web editor
                                             </div>
                                           </>
+                                        ) : field.type === 'slack-channel' ? (
+                                          <select
+                                            style={styles.paramSelect}
+                                            value={editedParams[field.key]?.value ?? editedParams[field.key] ?? field.getValue()}
+                                            onChange={(e) => {
+                                              updateParam(field.key, { value: e.target.value, mode: 'id', __rl: true });
+                                            }}
+                                          >
+                                            {field.options.length === 0 ? (
+                                              <option value={field.getValue()}>{getChannelDisplay(field.getValue()) || '(no channels found)'}</option>
+                                            ) : (
+                                              field.options.map(opt => (
+                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                              ))
+                                            )}
+                                          </select>
                                         ) : field.type === 'select' ? (
                                           <select
                                             style={styles.paramSelect}

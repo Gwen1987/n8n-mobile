@@ -2,9 +2,23 @@ import express from 'express';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { readFileSync, existsSync } from 'fs';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+
+// Load Slack channel name mappings
+const __dirname_early = dirname(fileURLToPath(import.meta.url));
+const channelConfigPath = join(__dirname_early, '..', 'slack-channels.json');
+let slackChannelNames = {};
+if (existsSync(channelConfigPath)) {
+  try {
+    slackChannelNames = JSON.parse(readFileSync(channelConfigPath, 'utf-8'));
+    console.log(`Loaded ${Object.keys(slackChannelNames).length} Slack channel name mappings`);
+  } catch (e) {
+    console.warn('Failed to parse slack-channels.json:', e.message);
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3080;
@@ -86,6 +100,47 @@ async function proxyToN8n(method, path, body = null) {
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Scan all workflows for Slack channel IDs
+app.get('/api/slack-channels', async (req, res) => {
+  try {
+    const { status, data } = await proxyToN8n('GET', '/workflows');
+    if (status !== 200) {
+      return res.status(status).json(data);
+    }
+
+    const channelIds = new Set();
+
+    // Scan each workflow for Slack nodes
+    for (const workflow of (data.data || [])) {
+      // Get full workflow details to access nodes
+      const { status: wfStatus, data: wfData } = await proxyToN8n('GET', `/workflows/${workflow.id}`);
+      if (wfStatus === 200 && wfData.nodes) {
+        for (const node of wfData.nodes) {
+          if (node.type?.toLowerCase().includes('slack')) {
+            // Check both channel and channelId params (n8n uses either)
+            const channelValue = node.parameters?.channelId?.value || node.parameters?.channelId
+              || node.parameters?.channel?.value || node.parameters?.channel;
+            if (channelValue && typeof channelValue === 'string' && !channelValue.includes('{{') && !channelValue.includes('$')) {
+              channelIds.add(channelValue);
+            }
+          }
+        }
+      }
+    }
+
+    // Build response with friendly names
+    const channels = Array.from(channelIds).map(id => ({
+      id,
+      name: slackChannelNames[id] || null,
+    }));
+
+    res.json({ channels, nameConfig: slackChannelNames });
+  } catch (error) {
+    console.error('Error scanning for Slack channels:', error.message);
+    res.status(500).json({ error: 'Failed to scan for Slack channels' });
+  }
 });
 
 // Workflows

@@ -15,6 +15,7 @@ RUN cd backend && npm install --production
 
 COPY backend/ ./backend/
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
+COPY slack-channels.json ./slack-channels.json
 
 EXPOSE 3080
 
