@@ -149,6 +149,19 @@ const styles = {
     color: '#64748b',
     marginTop: '4px',
   },
+  execError: {
+    fontSize: '12px',
+    color: '#fca5a5',
+    background: '#7f1d1d',
+    padding: '8px',
+    borderRadius: '4px',
+    marginTop: '8px',
+    wordBreak: 'break-word',
+  },
+  execErrorNode: {
+    color: '#f87171',
+    fontWeight: 500,
+  },
   loading: {
     textAlign: 'center',
     padding: '40px',
@@ -336,23 +349,33 @@ function App() {
           </div>
         ))}
 
-        {tab === 'executions' && executions.map(ex => (
-          <div key={ex.id} style={styles.card}>
-            <div style={styles.cardHeader}>
-              <span style={styles.execStatus}>
-                <span style={{
-                  ...styles.dot,
-                  background: ex.status === 'success' ? '#22c55e' : ex.status === 'error' ? '#ef4444' : '#f59e0b',
-                }} />
-                {ex.status}
-              </span>
+        {tab === 'executions' && executions.map(ex => {
+          const errorInfo = ex.data?.resultData?.error;
+          const failedNode = ex.data?.resultData?.lastNodeExecuted;
+          return (
+            <div key={ex.id} style={styles.card}>
+              <div style={styles.cardHeader}>
+                <span style={styles.execStatus}>
+                  <span style={{
+                    ...styles.dot,
+                    background: ex.status === 'success' ? '#22c55e' : ex.status === 'error' ? '#ef4444' : '#f59e0b',
+                  }} />
+                  {ex.status}
+                </span>
+              </div>
+              <div style={styles.workflowName}>{workflowNames[ex.workflowId] || `Workflow ${ex.workflowId}`}</div>
+              <div style={styles.execMeta}>
+                {formatDate(ex.startedAt)} &bull; {ex.stoppedAt ? `${((new Date(ex.stoppedAt) - new Date(ex.startedAt)) / 1000).toFixed(1)}s` : 'running'}
+              </div>
+              {ex.status === 'error' && errorInfo && (
+                <div style={styles.execError}>
+                  {failedNode && <div style={styles.execErrorNode}>{failedNode}</div>}
+                  {errorInfo.message}
+                </div>
+              )}
             </div>
-            <div style={styles.workflowName}>{workflowNames[ex.workflowId] || `Workflow ${ex.workflowId}`}</div>
-            <div style={styles.execMeta}>
-              {formatDate(ex.startedAt)} &bull; {ex.stoppedAt ? `${((new Date(ex.stoppedAt) - new Date(ex.startedAt)) / 1000).toFixed(1)}s` : 'running'}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

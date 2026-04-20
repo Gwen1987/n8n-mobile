@@ -89,9 +89,9 @@ app.post('/api/workflows/:id/deactivate', async (req, res) => {
 // Executions
 app.get('/api/executions', async (req, res) => {
   try {
-    const query = new URLSearchParams(req.query).toString();
-    const path = query ? `/executions?${query}` : '/executions';
-    const { status, data } = await proxyToN8n('GET', path);
+    const params = new URLSearchParams(req.query);
+    params.set('includeData', 'true');
+    const { status, data } = await proxyToN8n('GET', `/executions?${params}`);
     res.status(status).json(data);
   } catch (error) {
     console.error('Error fetching executions:', error.message);
