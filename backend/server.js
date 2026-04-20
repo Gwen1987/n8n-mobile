@@ -10,10 +10,53 @@ const app = express();
 const PORT = process.env.PORT || 3080;
 const N8N_BASE_URL = process.env.N8N_BASE_URL || 'http://localhost:5678';
 const N8N_API_KEY = process.env.N8N_API_KEY;
+const N8N_EMAIL = process.env.N8N_EMAIL;
+const N8N_PASSWORD = process.env.N8N_PASSWORD;
 
 if (!N8N_API_KEY) {
   console.error('ERROR: N8N_API_KEY environment variable is required');
   process.exit(1);
+}
+
+// Session cookie storage for internal API auth
+let sessionCookie = null;
+let sessionExpiry = 0;
+
+async function ensureSession() {
+  // Refresh session if expired or missing (refresh 5 min before expiry)
+  if (sessionCookie && Date.now() < sessionExpiry - 5 * 60 * 1000) {
+    return sessionCookie;
+  }
+
+  if (!N8N_EMAIL || !N8N_PASSWORD) {
+    throw new Error('N8N_EMAIL and N8N_PASSWORD required for workflow execution');
+  }
+
+  console.log('Authenticating with n8n...');
+  const loginRes = await fetch(`${N8N_BASE_URL}/rest/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ emailOrLdapLoginId: N8N_EMAIL, password: N8N_PASSWORD }),
+  });
+
+  if (!loginRes.ok) {
+    const err = await loginRes.text();
+    throw new Error(`n8n login failed: ${err}`);
+  }
+
+  // Extract session cookie from response
+  const setCookie = loginRes.headers.get('set-cookie');
+  if (!setCookie) {
+    throw new Error('No session cookie received from n8n');
+  }
+
+  // Parse the cookie (n8n uses 'n8n-auth' cookie)
+  sessionCookie = setCookie.split(';')[0];
+  // Session typically lasts 7 days, refresh after 6 days
+  sessionExpiry = Date.now() + 6 * 24 * 60 * 60 * 1000;
+
+  console.log('n8n session established');
+  return sessionCookie;
 }
 
 app.use(express.json());
@@ -88,38 +131,43 @@ app.post('/api/workflows/:id/deactivate', async (req, res) => {
 
 app.post('/api/workflows/:id/run', async (req, res) => {
   try {
-    // Use the public API endpoint for running workflows (added in n8n 1.x)
-    const { status, data } = await proxyToN8n('POST', `/workflows/${req.params.id}/run`, req.body || {});
-    // If the public API doesn't support it, try the test webhook approach
-    if (status === 405 || status === 404) {
-      // Fallback: try to get workflow and trigger via test webhook if it has one
-      const wfRes = await proxyToN8n('GET', `/workflows/${req.params.id}`);
-      if (wfRes.status === 200 && wfRes.data) {
-        const webhookNode = wfRes.data.nodes?.find(n => n.type === 'n8n-nodes-base.webhook');
-        if (webhookNode) {
-          const path = webhookNode.parameters?.path || req.params.id;
-          const webhookUrl = `${N8N_BASE_URL}/webhook-test/${path}`;
-          const webhookRes = await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ triggered: true, timestamp: new Date().toISOString() }),
-          });
-          const webhookData = await webhookRes.text();
-          try {
-            res.status(webhookRes.status).json(JSON.parse(webhookData));
-          } catch {
-            res.status(webhookRes.status).json({ message: 'Workflow triggered via test webhook' });
-          }
-          return;
-        }
-      }
-      res.status(status).json({ error: 'Workflow does not support direct execution. Add a webhook node to trigger it.' });
-      return;
+    // Fetch the workflow data first to find the trigger node
+    const { status: wfStatus, data: workflow } = await proxyToN8n('GET', `/workflows/${req.params.id}`);
+    if (wfStatus !== 200) {
+      return res.status(wfStatus).json(workflow);
     }
-    res.status(status).json(data);
+
+    // Find the first trigger node (nodes ending in 'Trigger' or manual trigger)
+    const triggerNode = workflow.nodes?.find(n =>
+      n.type?.includes('Trigger') || n.type === 'n8n-nodes-base.manualTrigger'
+    );
+
+    if (!triggerNode) {
+      return res.status(400).json({ error: 'No trigger node found in workflow' });
+    }
+
+    // Use n8n's internal API with session cookie auth
+    const cookie = await ensureSession();
+    const url = `${N8N_BASE_URL}/rest/workflows/${req.params.id}/run`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': cookie,
+      },
+      body: JSON.stringify({
+        triggerToStartFrom: {
+          name: triggerNode.name,
+          data: { main: [[{ json: {} }]] },
+        },
+      }),
+    });
+
+    const data = await response.json();
+    res.status(response.status).json(data);
   } catch (error) {
     console.error('Error running workflow:', error.message);
-    res.status(500).json({ error: 'Failed to run workflow' });
+    res.status(500).json({ error: error.message || 'Failed to run workflow' });
   }
 });
 
