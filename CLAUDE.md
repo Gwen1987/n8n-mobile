@@ -106,3 +106,15 @@ Note: N8N_BASE_URL uses the Docker internal hostname since proxy and n8n are on 
 - No TypeScript for v1
 - Minimal dependencies
 - Comments for anything non-obvious
+
+## Companion App: Tally Mobile
+
+`tally/` is a second, self-contained PWA in this repo, built the same way
+(Express proxy + React, Docker) because Tally has no mobile app. It reads
+forms and submissions from Tally's public API at `https://api.tally.so` and
+runs on port 3081 so it can sit alongside this app.
+
+- Key lives in `tally/.env` as `TALLY_API_KEY`, server-side only
+- Read-only: it never edits, closes, or deletes anything in Tally
+- Tally rate-limits to 100 req/min, so the proxy caches responses briefly
+- See `tally/README.md` for setup and deployment

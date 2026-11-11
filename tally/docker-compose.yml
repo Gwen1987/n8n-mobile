@@ -1,0 +1,18 @@
+services:
+  tally-mobile:
+    build: .
+    container_name: tally-mobile
+    restart: unless-stopped
+    ports:
+      - "3081:3081"
+    env_file:
+      - .env
+    networks:
+      # Same external network as n8n-mobile, so cloudflared can route to
+      # http://tally-mobile:3081 by container name. Drop this block if your
+      # tunnel points at the published host port instead.
+      - n8n-network
+
+networks:
+  n8n-network:
+    external: true
